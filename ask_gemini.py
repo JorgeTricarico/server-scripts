@@ -36,7 +36,7 @@ safety_settings = [
 ]
 
 model = genai.GenerativeModel(
-    model_name= "gemini-2.5-flash-preview-04-17", #"gemini-2.0-flash"  #"gemini-1.5-flash-latest", # O el modelo que prefieras y tengas acceso
+    model_name= "gemini-2.5-flash", #"gemini-2.0-flash"  #"gemini-1.5-flash-latest", # O el modelo que prefieras y tengas acceso
     generation_config=generation_config,
     safety_settings=safety_settings
 )
@@ -44,7 +44,11 @@ model = genai.GenerativeModel(
 def preguntar_a_gemini(pregunta):
     """Envía la pregunta a Gemini y devuelve la respuesta."""
     try:
-        response = model.generate_content(pregunta)
+        config = "Te hablo desde una terminal de un server linux LocOS muy limitado, Intel Atom N270 (2) @ 1.60,  de 32 bit y 1 de ram," /
+         ", se trata de ser breve, pero si es necesario extiendete un poco. Utiliza formas y dibujos en codigo ascii para que sea mas llevadero." /
+         "consulta:\n"
+        prompt = config + pregunta
+        response = model.generate_content(prompt)
         return response.text
     except Exception as e:
         print(f"Error al contactar a Gemini: {e}", file=sys.stderr)
