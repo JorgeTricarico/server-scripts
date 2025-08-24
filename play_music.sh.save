@@ -156,7 +156,7 @@ else
     wait $YTDLP_PID
 
     if [ -f "$EXPECTED_AUDIO_FILE" ]; then
-	printf "\r[✔] Descarga completa!     \n"
+	echo "Descarga completa! [✔]"
         if [ "$MODE" = "p" ]; then
             play_song "$EXPECTED_AUDIO_FILE"
         fi
