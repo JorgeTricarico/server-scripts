@@ -1,8 +1,11 @@
 #!/bin/bash
-
-# play_video.sh - Descarga o reproduce videos de YouTube en Linux Mint (Celluloid)
-# Opciones: -d (descargar), -p (descargar y reproducir, default), -s (streaming inmediato)
-#           -r resolución (default 480p, ej: 720, 1080)
+# play_video.sh - Descarga o reproduce videos de YouTube en Raspberry Pi 3+ con salida HDMI
+# Opciones:
+#   -d : solo descargar
+#   -p : descargar y reproducir después (default)
+#   -s : streaming inmediato
+#   -h : descargar en mayor definición (720p)
+#   <término de búsqueda> : lo que quieras buscar en YouTube
 
 DOWNLOAD_DIR="$HOME/disco_externo/videos"
 sudo chown jorge:jorge "$DOWNLOAD_DIR"
@@ -11,13 +14,12 @@ mkdir -p "$DOWNLOAD_DIR"
 export PATH="$HOME/.local/bin:$PATH"
 
 # --- FUNCIONES ---
-
 usage() {
-    echo "Uso: $0 [-d|-p|-s] [-r resolucion] <término de búsqueda>"
+    echo "Uso: $0 [-d|-p|-s] [-h] <término de búsqueda>"
     echo "  -d : solo descargar"
     echo "  -p : descargar y reproducir después (default)"
     echo "  -s : streaming inmediato"
-    echo "  -r : resolución (default 480)"
+    echo "  -h : alta definición (720p en lugar de 360p)"
     exit 1
 }
 
@@ -25,7 +27,7 @@ usage() {
 spinner() {
     local pid=$1
     local delay=0.1
-    local spin='|/-\\'
+    local spin='|/-\'
     local i=0
     while kill -0 $pid 2>/dev/null; do
         i=$(( (i+1) %4 ))
@@ -45,17 +47,17 @@ sanitize_filename() {
 }
 
 # --- PARÁMETROS ---
-MODE="p"    # default: download & play
-RES="480"
+MODE="p"      # default: descargar y reproducir
+RES="360"     # default resolución baja
 
-while getopts "dpsr:" opt; do
-  case $opt in
-    d) MODE="d" ;;
-    p) MODE="p" ;;
-    s) MODE="s" ;;
-    r) RES="$OPTARG" ;;
-    *) usage ;;
-  esac
+while getopts "dpsh" opt; do
+    case $opt in
+        d) MODE="d" ;;
+        p) MODE="p" ;;
+        s) MODE="s" ;;
+        h) RES="720" ;;   # alta definición
+        *) usage ;;
+    esac
 done
 shift $((OPTIND -1))
 
@@ -80,23 +82,24 @@ echo "URL: $VIDEO_URL"
 echo "Resolución: ${RES}p"
 
 case "$MODE" in
-  d) # Solo descargar
-     yt-dlp -f "bestvideo[height<=$RES]+bestaudio/best[height<=$RES]" \
-        -o "$EXPECTED_VIDEO_FILE" "$VIDEO_URL" >/tmp/yt-dlp.log 2>&1 &
-     spinner $!
-     wait
-     echo "Video descargado en $EXPECTED_VIDEO_FILE"
-     ;;
-  p) # Descargar y reproducir
-     yt-dlp -f "bestvideo[height<=$RES]+bestaudio/best[height<=$RES]" \
-        -o "$EXPECTED_VIDEO_FILE" "$VIDEO_URL" >/tmp/yt-dlp.log 2>&1 &
-     spinner $!
-     wait
-     echo "Video descargado en $EXPECTED_VIDEO_FILE"
-     mpv --vo=gpu "$EXPECTED_VIDEO_FILE" >/dev/null 2>&1 &
-     ;;
-  s) # Streaming inmediato
-     echo "Reproducción en streaming..."
-     mvp --vo=gpu "$VIDEO_URL" >/dev/null 2>&1 &
-     ;;
+    d) # Solo descargar
+        yt-dlp -f "bestvideo[height<=$RES]+bestaudio/best[height<=$RES]" \
+            -o "$EXPECTED_VIDEO_FILE" "$VIDEO_URL" >/tmp/yt-dlp.log 2>&1 &
+        spinner $!
+        wait
+        echo "Video descargado en $EXPECTED_VIDEO_FILE"
+        ;;
+    p) # Descargar y reproducir
+        yt-dlp -f "bestvideo[height<=$RES]+bestaudio/best[height<=$RES]" \
+            -o "$EXPECTED_VIDEO_FILE" "$VIDEO_URL" >/tmp/yt-dlp.log 2>&1 &
+        spinner $!
+        wait
+        echo "Video descargado en $EXPECTED_VIDEO_FILE"
+        mpv --vo=gpu --audio-device=alsa/plughw:1,0 "$EXPECTED_VIDEO_FILE" >/dev/null 2>&1 
+        ;;
+    s) # Streaming inmediato
+        echo "Reproducción en streaming..."
+        mpv --vo=gpu --audio-device=alsa/plughw:1,0 "$VIDEO_URL" >/dev/null 2>&1
+        ;;
 esac
+
