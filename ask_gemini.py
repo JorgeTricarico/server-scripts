@@ -35,10 +35,18 @@ safety_settings = [
     {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
 ]
 
+SYSTEM_PROMPT = (
+    "Eres un asistente técnico respondiendo a través de Telegram. "
+    "Tus respuestas DEBEN ser extremadamente concisas, directas y al grano. "
+    "NUNCA des introducciones, saludos, ni conclusiones largas. "
+    "Ve directamente a la solución técnica o la respuesta solicitada."
+)
+
 model = genai.GenerativeModel(
-    model_name= "gemini-2.5-flash-preview-04-17", #"gemini-2.0-flash"  #"gemini-1.5-flash-latest", # O el modelo que prefieras y tengas acceso
+    model_name="gemini-3.1-flash-lite-preview",
     generation_config=generation_config,
-    safety_settings=safety_settings
+    safety_settings=safety_settings,
+    system_instruction=SYSTEM_PROMPT
 )
 
 def preguntar_a_gemini(pregunta):

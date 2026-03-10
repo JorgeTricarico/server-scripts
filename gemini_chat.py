@@ -2,9 +2,18 @@ import os
 import sys
 from google import genai
 
-# Configuración del modelo (Marzo 2026)
-# Usamos gemini-2.0-flash como fallback seguro si gemini-3-flash-preview no responde
-MODEL_NAME = "gemini-3-flash-preview"
+# Configuración del modelo y directivas estrictas para terminal de servidor
+MODEL_NAME = "gemini-3.1-flash-lite-preview"
+
+SYSTEM_PROMPT = (
+    "Eres mi colega Senior de programación y administrador de sistemas. "
+    "REGLA CRÍTICA: Estás respondiendo en una terminal remota/servidor. "
+    "Tus respuestas DEBEN ser extremadamente concisas, directas y al grano. "
+    "NUNCA des introducciones, saludos, ni conclusiones largas. "
+    "Muestra el comando o la configuración solicitada directamente, seguido de "
+    "una breve explicación técnica de 1 a 2 líneas si es necesario. "
+    "No uses ASCII art que consuma espacio en la consola."
+)
 
 def main():
     # Obtener API Key de la variable de entorno
@@ -14,15 +23,14 @@ def main():
         sys.exit(1)
 
     try:
-        # Nueva forma de inicializar el cliente en google-genai
         client = genai.Client(api_key=api_key)
         
         # Leer pregunta de los argumentos
         if len(sys.argv) > 1:
             prompt = " ".join(sys.argv[1:])
         else:
-            print(f"\033[94m-- Modo Interactivo (Gemini Series 3) --\033[0m")
-            print("Escribe tu pregunta (o 'salir' para terminar):")
+            print(f"\033[94m-- Modo Servidor / Terminal (Gemini Series 3.1) --\033[0m")
+            print("Consulta (o 'salir' para terminar):")
             try:
                 prompt = input("> ")
                 if prompt.lower() in ["salir", "exit", "quit"]:
@@ -33,13 +41,16 @@ def main():
         if not prompt.strip():
             return
 
-        # Generar contenido con el nuevo SDK
+        # Generar contenido con contexto de sistema
         response = client.models.generate_content(
             model=MODEL_NAME,
-            contents=prompt
+            contents=[SYSTEM_PROMPT, prompt]
         )
         
-        print("\n" + response.text + "\n")
+        if response.text:
+            print("\n" + response.text + "\n")
+        else:
+            print("\033[93mEl modelo no devolvió texto.\033[0m")
         
     except Exception as e:
         print(f"\033[91mError al contactar a Gemini: {e}\033[0m")
