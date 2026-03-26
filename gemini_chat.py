@@ -8,35 +8,37 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-# Configuración del Modelo 2026
-MODEL_NAME = "gemini-3-flash-preview"  # Modelo Gemini 3 solicitado por el usuario
+# Configuración del Modelo 2026 (Marzo)
+# Usamos el identificador GA para evitar redirecciones a versiones preview viejas
+MODEL_NAME = "gemini-3.1-flash" 
 
 # Detección de Hostname para Prompt Personalizado
 hostname = socket.gethostname().lower()
 
+# Prompts refinados para 2026 - Eliminada cualquier mención a 1.5 o versiones obsoletas
 PROMPTS = {
     "jorge-thinkpad-x270": (
-        "Eres el asistente Senior en mi ThinkPad X270 (Nodo Principal). "
-        "Contexto: Desarrollo, automatización con Gemini CLI y gestión de red Tailscale. "
-        "Sé extremadamente técnico, conciso y directo al código."
+        "Asistente Senior Gemini 3.1 en ThinkPad X270 (Nodo Maestro). "
+        "Contexto 2026: Desarrollo avanzado, automatización con Gemini CLI y malla Tailscale. "
+        "Prioridad: Eficiencia técnica extrema y código puro."
     ),
     "raspberrypi": (
-        "Eres el asistente en mi Raspberry Pi (Centro de Control). "
-        "Contexto: Domótica, reproducción de música, TTS (hablar.sh) y Bot de Telegram. "
-        "Ayúdame con scripts ligeros y comandos de control de hardware/multimedia."
+        "Asistente Gemini 3.1 en Raspberry Pi (Controlador de Red). "
+        "Contexto 2026: Domótica, gestión de audio (hablar.sh) e integración con Bot de Telegram. "
+        "Enfócate en comandos rápidos y control de dispositivos."
     ),
     "iqual-mint": (
-        "Eres el asistente en Iqual-Mint (Servidor de Archivos). "
-        "Contexto: Gestión de Nextcloud, almacenamiento masivo y servicios web. "
-        "Enfócate en administración de sistemas, logs y mantenimiento de servicios."
+        "Asistente Gemini 3.1 en Iqual-Mint (Nodo de Almacenamiento). "
+        "Contexto 2026: Administración de Nextcloud y servicios de nube privada. "
+        "Prioridad: Gestión de logs, integridad de datos y mantenimiento."
     )
 }
 
-# Prompt por defecto si no reconoce el host
-SYSTEM_PROMPT = PROMPTS.get(hostname, "Eres mi asistente Senior de programación conciso.")
+SYSTEM_PROMPT = PROMPTS.get(hostname, "Asistente Senior Gemini 3.1.")
 SYSTEM_PROMPT += (
-    " REGLA CRÍTICA: Respuestas ultra-directas. Sin saludos ni intros. "
-    "Sin bloques Markdown ```. Código directo."
+    " REGLA DE ORO: Respuestas instantáneas y sin relleno. "
+    "NO menciones versiones antiguas como 1.5 o 2.0; eres el motor 3.1 vigente. "
+    "Sin bloques de código Markdown. Código directo en texto plano."
 )
 
 CHAT_DIR = os.path.expanduser("~/.gemini_chat")
@@ -82,13 +84,16 @@ def main():
     path_key = "GLOBAL" if is_global else cwd
     history_file = GLOBAL_SESSION_FILE if is_global else os.path.join(SESSIONS_DIR, f"{hashlib.md5(cwd.encode()).hexdigest()}.json")
 
-    if should_restart and os.path.exists(history_file): os.remove(history_file)
+    if should_restart and os.path.exists(history_file): 
+        os.remove(history_file)
+        print(f"\033[92m[✓] Historial reiniciado.\033[0m")
 
     try:
+        # El cliente de 2026 ya usa v1 por defecto para Gemini 3.1
         client = genai.Client(api_key=api_key)
         history = load_history(history_file)
         
-        print(f"\033[90m[{hostname.upper()}] [Sesión: {path_key}] [{len(history)} msgs]\033[0m")
+        print(f"\033[90m[{hostname.upper()}] [Motor: 3.1] [Sesión: {path_key}] [{len(history)} msgs]\033[0m")
 
         chat = client.chats.create(
             model=MODEL_NAME,
@@ -111,7 +116,7 @@ def main():
             save_history(chat, history_file)
 
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error crítico de conexión: {e}")
 
 if __name__ == "__main__":
     main()
