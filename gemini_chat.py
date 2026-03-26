@@ -3,26 +3,45 @@ import sys
 import json
 import re
 import hashlib
+import socket
 from datetime import datetime
 from google import genai
 from google.genai import types
 
-# Configuración
-MODEL_NAME = "gemini-3-flash-preview"  # Actualizado a la versión sugerida por el usuario
-SYSTEM_PROMPT = (
-    "Eres mi colega Senior de programación. Te hablo desde la terminal de mi ThinkPad X270. "
-    "REGLA CRÍTICA: Tus respuestas DEBEN ser extremadamente concisas y directas. "
-    "NUNCA des introducciones, saludos, ni conclusiones largas. Ve directamente al código. "
-    "Estás respondiendo en una consola de texto pura, el espacio es limitado. "
-    "NO utilices bloques de código Markdown (```bash). Escribe el código directamente. "
-    "Si te pido un comando, dame solo eso y una explicación de 1 línea máximo."
+# Configuración del Modelo 2026
+MODEL_NAME = "gemini-2.5-flash"  # Versión estable 2026 para máxima compatibilidad
+
+# Detección de Hostname para Prompt Personalizado
+hostname = socket.gethostname().lower()
+
+PROMPTS = {
+    "jorge-thinkpad-x270": (
+        "Eres el asistente Senior en mi ThinkPad X270 (Nodo Principal). "
+        "Contexto: Desarrollo, automatización con Gemini CLI y gestión de red Tailscale. "
+        "Sé extremadamente técnico, conciso y directo al código."
+    ),
+    "raspberrypi": (
+        "Eres el asistente en mi Raspberry Pi (Centro de Control). "
+        "Contexto: Domótica, reproducción de música, TTS (hablar.sh) y Bot de Telegram. "
+        "Ayúdame con scripts ligeros y comandos de control de hardware/multimedia."
+    ),
+    "iqual-mint": (
+        "Eres el asistente en Iqual-Mint (Servidor de Archivos). "
+        "Contexto: Gestión de Nextcloud, almacenamiento masivo y servicios web. "
+        "Enfócate en administración de sistemas, logs y mantenimiento de servicios."
+    )
+}
+
+# Prompt por defecto si no reconoce el host
+SYSTEM_PROMPT = PROMPTS.get(hostname, "Eres mi asistente Senior de programación conciso.")
+SYSTEM_PROMPT += (
+    " REGLA CRÍTICA: Respuestas ultra-directas. Sin saludos ni intros. "
+    "Sin bloques Markdown ```. Código directo."
 )
 
 CHAT_DIR = os.path.expanduser("~/.gemini_chat")
 SESSIONS_DIR = os.path.join(CHAT_DIR, "sessions")
-INDEX_FILE = os.path.join(CHAT_DIR, "index.json")
 GLOBAL_SESSION_FILE = os.path.join(SESSIONS_DIR, "global_session.json")
-
 os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 def clean_markdown(text):
@@ -51,52 +70,25 @@ def save_history(chat, history_file):
             json.dump(new_history, f)
     except Exception: pass
 
-def show_help():
-    print("""
-\033[94mChat con Gemini - Ayuda\033[0m
-Uso: \033[93mchat [opciones] [mensaje]\033[0m
-
-\033[94mOpciones:\033[0m
-  \033[93m-h, --help\033[0m       Muestra esta ayuda.
-  \033[93m-r, --restart\033[0m    Borra el historial de la sesión actual.
-  \033[93m-g, --global\033[0m     Usa la sesión global (compartida entre carpetas).
-  \033[93m-s, --sessions\033[0m   Lista sesiones guardadas.
-
-\033[94mComandos interactivos:\033[0m
-  \033[93mexit\033[0m             Salir.
-  \033[93m/restart\033[0m         Reiniciar sesión.
-  \033[93m/help\033[0m            Ver esta ayuda.
-""")
-
 def main():
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        print("Error: GEMINI_API_KEY no configurada.")
-        sys.exit(1)
-
     args = sys.argv[1:]
-    if "-h" in args or "--help" in args:
-        show_help(); sys.exit(0)
-
-    is_global = "-g" in args or "--global" in args
-    should_restart = "-r" in args or "--restart" in args or "restart" in args
     
-    clean_args = [a for a in args if a not in ["-g", "--global", "-r", "--restart", "restart"]]
+    is_global = "-g" in args or "--global" in args
+    should_restart = "-r" in args or "--restart" in args
+    clean_args = [a for a in args if a not in ["-g", "--global", "-r", "--restart"]]
     
     cwd = os.getcwd()
     path_key = "GLOBAL" if is_global else cwd
     history_file = GLOBAL_SESSION_FILE if is_global else os.path.join(SESSIONS_DIR, f"{hashlib.md5(cwd.encode()).hexdigest()}.json")
 
-    if should_restart:
-        if os.path.exists(history_file): os.remove(history_file)
-        print(f"\033[92m[✓] Sesión reiniciada para: {path_key}\033[0m")
-        if not clean_args: sys.exit(0)
+    if should_restart and os.path.exists(history_file): os.remove(history_file)
 
     try:
         client = genai.Client(api_key=api_key)
         history = load_history(history_file)
         
-        print(f"\033[90m[Sesión: {path_key}] [{len(history)} msgs]\033[0m")
+        print(f"\033[90m[{hostname.upper()}] [Sesión: {path_key}] [{len(history)} msgs]\033[0m")
 
         chat = client.chats.create(
             model=MODEL_NAME,
@@ -109,22 +101,13 @@ def main():
             while True:
                 try: user_input = input("> ")
                 except (EOFError, KeyboardInterrupt): print(); break
-                
                 if user_input.lower() in ["exit", "quit"]: break
-                if user_input.startswith("/help"): show_help(); continue
-                if user_input.startswith("/restart"):
-                    if os.path.exists(history_file): os.remove(history_file)
-                    chat = client.chats.create(model=MODEL_NAME, history=[], config=types.GenerateContentConfig(system_instruction=SYSTEM_PROMPT))
-                    print("\033[92mSesión limpia.\033[0m"); continue
-                
                 res = chat.send_message(user_input)
-                clean_res = clean_markdown(res.text)
-                print("\n" + clean_res + "\n")
+                print("\n" + clean_markdown(res.text) + "\n")
                 save_history(chat, history_file)
         else:
             res = chat.send_message(prompt)
-            clean_res = clean_markdown(res.text)
-            print("\n" + clean_res + "\n")
+            print("\n" + clean_markdown(res.text) + "\n")
             save_history(chat, history_file)
 
     except Exception as e:
