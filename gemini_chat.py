@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 
 # Configuración del Modelo 2026
-MODEL_NAME = "gemini-2.5-flash-lite"  # El modelo más eficiente y con mejor disponibilidad en 2026
+MODEL_NAME = "gemini-3-flash-preview"  # Modelo Gemini 3 solicitado por el usuario
 
 # Detección de Hostname para Prompt Personalizado
 hostname = socket.gethostname().lower()
