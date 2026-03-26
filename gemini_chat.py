@@ -8,7 +8,7 @@ from google import genai
 from google.genai import types
 
 # Configuración
-MODEL_NAME = "gemini-2.0-flash"  # Actualizado a una versión estable y rápida
+MODEL_NAME = "gemini-3-flash-preview"  # Actualizado a la versión sugerida por el usuario
 SYSTEM_PROMPT = (
     "Eres mi colega Senior de programación. Te hablo desde la terminal de mi ThinkPad X270. "
     "REGLA CRÍTICA: Tus respuestas DEBEN ser extremadamente concisas y directas. "
