@@ -4,41 +4,38 @@ import json
 import re
 import hashlib
 import socket
+import platform
 from datetime import datetime
 from google import genai
 from google.genai import types
 
-# Configuración del Modelo 2026 (Marzo)
-# Usamos el identificador GA para evitar redirecciones a versiones preview viejas
-MODEL_NAME = "gemini-3.1-flash" 
+# Configuración del Modelo - Usamos el más avanzado disponible
+MODEL_NAME = "gemini-3.1-flash-lite-preview" 
 
-# Detección de Hostname para Prompt Personalizado
+# --- CONTEXTO DINÁMICO ---
 hostname = socket.gethostname().lower()
-
-# Prompts refinados para 2026 - Eliminada cualquier mención a 1.5 o versiones obsoletas
-PROMPTS = {
-    "jorge-thinkpad-x270": (
-        "Asistente Senior Gemini 3.1 en ThinkPad X270 (Nodo Maestro). "
-        "Contexto 2026: Desarrollo avanzado, automatización con Gemini CLI y malla Tailscale. "
-        "Prioridad: Eficiencia técnica extrema y código puro."
-    ),
-    "raspberrypi": (
-        "Asistente Gemini 3.1 en Raspberry Pi (Controlador de Red). "
-        "Contexto 2026: Domótica, gestión de audio (hablar.sh) e integración con Bot de Telegram. "
-        "Enfócate en comandos rápidos y control de dispositivos."
-    ),
-    "iqual-mint": (
-        "Asistente Gemini 3.1 en Iqual-Mint (Nodo de Almacenamiento). "
-        "Contexto 2026: Administración de Nextcloud y servicios de nube privada. "
-        "Prioridad: Gestión de logs, integridad de datos y mantenimiento."
-    )
+now = datetime.now()
+data_context = {
+    "year": now.year,
+    "date": now.strftime("%d/%m/%Y %H:%M:%S"),
+    "os": platform.platform(),
+    "python_version": platform.python_version(),
+    "node": hostname.upper()
 }
 
-SYSTEM_PROMPT = PROMPTS.get(hostname, "Asistente Senior Gemini 3.1.")
-SYSTEM_PROMPT += (
-    " REGLA DE ORO: Respuestas instantáneas y sin relleno. "
-    "NO menciones versiones antiguas como 1.5 o 2.0; eres el motor 3.1 vigente. "
-    "Sin bloques de código Markdown. Código directo en texto plano."
+PROMPTS = {
+    "jorge-thinkpad-x270": "Nodo Maestro de Desarrollo. Enfoque: Automatización, Git, Tailscale y Gemini CLI.",
+    "raspberrypi": "Nodo de Control Multimedia. Enfoque: Domótica, TTS (hablar.sh), Música y Bot Telegram.",
+    "iqual-mint": "Nodo de Almacenamiento. Enfoque: Servidor Nextcloud, Backup e integridad de datos."
+}
+
+# Construcción del System Prompt Dinámico
+base_prompt = PROMPTS.get(hostname, "Asistente Senior Multi-dispositivo.")
+SYSTEM_PROMPT = (
+    f"SISTEMA: {data_context['node']} | FECHA: {data_context['date']} | OS: {data_context['os']}\n"
+    f"CONTEXTO: {base_prompt}\n"
+    f"REGLA CRÍTICA: Eres Gemini 3.1. Respuestas directas, sin intros, sin markdown ```. "
+    f"Estás en el año {data_context['year']}. Olvida versiones obsoletas (1.5, 2.0)."
 )
 
 CHAT_DIR = os.path.expanduser("~/.gemini_chat")
@@ -75,7 +72,6 @@ def save_history(chat, history_file):
 def main():
     api_key = os.environ.get("GEMINI_API_KEY")
     args = sys.argv[1:]
-    
     is_global = "-g" in args or "--global" in args
     should_restart = "-r" in args or "--restart" in args
     clean_args = [a for a in args if a not in ["-g", "--global", "-r", "--restart"]]
@@ -86,14 +82,12 @@ def main():
 
     if should_restart and os.path.exists(history_file): 
         os.remove(history_file)
-        print(f"\033[92m[✓] Historial reiniciado.\033[0m")
+        print(f"\033[92m[✓] Reset: {path_key}\033[0m")
 
     try:
-        # El cliente de 2026 ya usa v1 por defecto para Gemini 3.1
         client = genai.Client(api_key=api_key)
         history = load_history(history_file)
-        
-        print(f"\033[90m[{hostname.upper()}] [Motor: 3.1] [Sesión: {path_key}] [{len(history)} msgs]\033[0m")
+        print(f"\033[90m[{data_context['node']}] [{data_context['date']}] [H:{len(history)}]\033[0m")
 
         chat = client.chats.create(
             model=MODEL_NAME,
@@ -114,9 +108,8 @@ def main():
             res = chat.send_message(prompt)
             print("\n" + clean_markdown(res.text) + "\n")
             save_history(chat, history_file)
-
     except Exception as e:
-        print(f"Error crítico de conexión: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
