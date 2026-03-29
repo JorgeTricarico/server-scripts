@@ -10,7 +10,7 @@ from google.genai import types
 
 # Configuración de Modelos
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-OLLAMA_MODEL = "qwen2.5:3b"
+OLLAMA_MODEL = "qwen2.5:1.5b"
 OLLAMA_URL = "http://100.115.152.45:11434/api/generate" # IP de Iqual-Mint en Tailscale
 
 def ask_gemini(prompt, api_key):
@@ -25,7 +25,7 @@ def ask_gemini(prompt, api_key):
 
 def ask_ollama(prompt):
     try:
-        res = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}, timeout=30)
+        res = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}, timeout=60)
         return res.json().get('response', 'Error en IA Local')
     except Exception as e:
         return f"\033[91m[!] IA Local no disponible (Iqual-Mint Offline): {e}\033[0m"
