@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# claude-biz — launch Claude Code with business MCPs (Slack + Notion) enabled
+# for the current project, restoring the disabled state on exit.
+#
+# The MCPs live in ~/.claude.json under projects[<cwd>].disabledMcpServers.
+# Claude Code reads this list at startup, so we mutate it just-in-time.
+
+set -euo pipefail
+
+CONFIG="$HOME/.claude.json"
+LOCK="/tmp/claude-biz.$(id -u).lock"
+PROJECT="$(pwd -P)"
+TOGGLES_JSON='["claude.ai Slack","claude.ai Notion"]'
+
+if [[ ! -f "$CONFIG" ]]; then
+  echo "claude-biz: $CONFIG not found — is Claude Code installed?" >&2
+  exit 1
+fi
+
+# Single-flight: another claude-biz session already mutating state
+if [[ -f "$LOCK" ]] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo "claude-biz: another session is active (pid $(cat "$LOCK")). Close it first." >&2
+  exit 1
+fi
+echo $$ > "$LOCK"
+
+BACKUP_DISABLED="$(PROJECT="$PROJECT" python3 -c '
+import json, os, sys
+d = json.load(open(os.path.expanduser("~/.claude.json")))
+proj = d.get("projects", {}).get(os.environ["PROJECT"], {})
+print(json.dumps(proj.get("disabledMcpServers", [])))
+')"
+
+restore() {
+  PROJECT="$PROJECT" BACKUP="$BACKUP_DISABLED" python3 - <<'PY' || echo "claude-biz: WARN restore failed — check $CONFIG" >&2
+import json, os, tempfile
+cfg = os.path.expanduser("~/.claude.json")
+with open(cfg) as f: d = json.load(f)
+proj = d.setdefault("projects", {}).setdefault(os.environ["PROJECT"], {})
+proj["disabledMcpServers"] = json.loads(os.environ["BACKUP"])
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(cfg))
+with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2)
+os.replace(tmp, cfg)
+PY
+  rm -f "$LOCK"
+}
+trap restore EXIT INT TERM
+
+PROJECT="$PROJECT" TOGGLES="$TOGGLES_JSON" python3 - <<'PY'
+import json, os, tempfile
+cfg = os.path.expanduser("~/.claude.json")
+with open(cfg) as f: d = json.load(f)
+proj = d.setdefault("projects", {}).setdefault(os.environ["PROJECT"], {})
+disabled = set(proj.get("disabledMcpServers", []))
+toggles = set(json.loads(os.environ["TOGGLES"]))
+proj["disabledMcpServers"] = sorted(disabled - toggles)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(cfg))
+with os.fdopen(fd, "w") as f: json.dump(d, f, indent=2)
+os.replace(tmp, cfg)
+PY
+
+echo "claude-biz: Slack + Notion enabled for this session (will restore on exit)"
+exec claude "$@"

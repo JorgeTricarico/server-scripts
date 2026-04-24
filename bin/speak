@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""
+speak — TTS wrapper using Piper + PowerShell SoundPlayer (WSL2/WSLg)
+Falls back to ffplay if PULSE_SERVER is set.
+
+Usage:
+  echo "texto" | speak
+  speak "texto directo"
+"""
+import sys
+import re
+import subprocess
+import os
+import tempfile
+
+PIPER = os.path.expanduser("~/.local/bin/piper")
+MODEL = os.path.expanduser("~/.local/share/piper-voices/es_AR-daniela-high/es_AR-daniela-high.onnx")
+MODEL_JSON = MODEL + ".json"
+
+
+def clean_markdown(text: str) -> str:
+    # Remove fenced code blocks (```...```)
+    text = re.sub(r'```[\s\S]*?```', '', text)
+    # Remove inline code (`...`)
+    text = re.sub(r'`[^`]+`', '', text)
+    # Resolve markdown links [text](url) → text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Remove bold/italic markers (**text**, *text*, __text__, _text_)
+    text = re.sub(r'\*{1,2}([^*]+)\*{1,2}', r'\1', text)
+    text = re.sub(r'_{1,2}([^_]+)_{1,2}', r'\1', text)
+    # Remove table separators (lines like |---|---|)
+    text = re.sub(r'^\s*\|[-| :]+\|\s*$', '', text, flags=re.MULTILINE)
+    # Convert table rows to readable text (strip pipes)
+    text = re.sub(r'\|', ' ', text)
+    # Remove bullet/numbered list markers (-, *, +, 1.)
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+    # Remove heading markers (#, ##, etc.)
+    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
+    # Collapse multiple blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def play_via_powershell(wav_path: str) -> int:
+    """Play a WAV file using PowerShell SoundPlayer (works in WSL2 without PulseAudio)."""
+    win_path_result = subprocess.run(
+        ["wslpath", "-w", wav_path],
+        capture_output=True, text=True
+    )
+    if win_path_result.returncode != 0:
+        print("speak: wslpath failed", file=sys.stderr)
+        return 1
+    win_path = win_path_result.stdout.strip()
+    ps_cmd = f"(New-Object Media.SoundPlayer '{win_path}').PlaySync()"
+    result = subprocess.run(
+        ["powershell.exe", "-Command", ps_cmd],
+        capture_output=True, text=True
+    )
+    if result.returncode != 0:
+        print(f"speak: PowerShell SoundPlayer failed: {result.stderr}", file=sys.stderr)
+    return result.returncode
+
+
+def play_via_ffplay_pulse(wav_path: str) -> int:
+    """Play via ffplay using PulseAudio — used when PULSE_SERVER is available."""
+    result = subprocess.run(
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "error", wav_path],
+        capture_output=True, text=True
+    )
+    return result.returncode
+
+
+def main():
+    if len(sys.argv) > 1:
+        raw = ' '.join(sys.argv[1:])
+    else:
+        raw = sys.stdin.read()
+
+    text = clean_markdown(raw)
+
+    if not text:
+        print("speak: no text provided", file=sys.stderr)
+        sys.exit(1)
+
+    # Generate WAV to temp file
+    wav_fd, wav_path = tempfile.mkstemp(suffix='.wav', prefix='speak_')
+    os.close(wav_fd)
+
+    try:
+        length_scale = os.environ.get('SPEAK_RATE', '1.25')
+        piper_cmd = [
+            PIPER,
+            "--model", MODEL,
+            "--config", MODEL_JSON,
+            "--output_file", wav_path,
+            "--length_scale", length_scale,
+        ]
+
+        result = subprocess.run(
+            piper_cmd,
+            input=text.encode('utf-8'),
+            capture_output=True,
+        )
+
+        if result.returncode != 0:
+            err = result.stderr.decode('utf-8', errors='replace')
+            print(f"speak: piper failed ({result.returncode}): {err}", file=sys.stderr)
+            sys.exit(1)
+
+        if not os.path.exists(wav_path) or os.path.getsize(wav_path) < 100:
+            print("speak: piper produced empty output", file=sys.stderr)
+            sys.exit(1)
+
+        # Choose playback method
+        pulse_server = os.environ.get('PULSE_SERVER', '')
+        pulse_native = '/run/user/{}/pulse/native'.format(os.getuid())
+
+        if pulse_server and os.path.exists(pulse_server.replace('unix:', '')):
+            rc = play_via_ffplay_pulse(wav_path)
+        elif os.path.exists(pulse_native) and os.path.getsize(pulse_native) > 0:
+            rc = play_via_ffplay_pulse(wav_path)
+        else:
+            # WSL2 without running PulseAudio — use Windows PowerShell
+            rc = play_via_powershell(wav_path)
+
+        if rc != 0:
+            print(f"speak: playback failed (exit {rc})", file=sys.stderr)
+            sys.exit(rc)
+
+    finally:
+        try:
+            os.unlink(wav_path)
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()
