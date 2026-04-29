@@ -8,8 +8,6 @@ import argparse
 import platform
 import re
 from datetime import datetime
-from google import genai
-from google.genai import types
 
 # ==================================================================================
 # ⚠️ LLM MANDATE / CONTRATO DE DESARROLLO (2026) ⚠️
@@ -22,7 +20,7 @@ from google.genai import types
 # ==================================================================================
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
-CEREBRAS_MODEL = "qwen-3-235b-a22b-instruct-2507"
+CEREBRAS_MODEL = "qwen2.5-72b"
 CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
 OLLAMA_MODEL = "qwen2.5:1.5b"
 OLLAMA_URL = "http://100.115.152.45:11434/api/chat"
@@ -68,91 +66,65 @@ def save_history(h_file, history, user_msg, model_res):
     history.append({"role": "assistant", "content": model_res})
     with open(h_file, "w") as f: json.dump(history[-20:], f)
 
-def ask_gemini(prompt, api_key, history, stream=True):
-    client = genai.Client(api_key=api_key)
-    # Formatear contenidos (historial + prompt actual) para la nueva SDK
-    contents = []
-    for m in history:
-        role = "user" if m["role"] == "user" else "model"
-        contents.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
-    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+def ask_gemini(prompt, api_key, history):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
+    contents = [{"role": "user" if m["role"]=="user" else "model", "parts": [{"text": m["content"]}]} for m in history]
+    contents.append({"role": "user", "parts": [{"text": f"{get_system_prompt()}\n\n{prompt}"}]})
     
-    full_res = ""
-    config = types.GenerateContentConfig(system_instruction=get_system_prompt())
-    if stream:
-        for chunk in client.models.generate_content_stream(model=GEMINI_MODEL, contents=contents, config=config):
-            text = chunk.text or ""
-            print(text, end="", flush=True); full_res += text
-        print()
-    else:
-        res = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
-        full_res = res.text; print(clean_terminal_output(full_res))
-    return full_res
+    res = requests.post(url, json={"contents": contents}, timeout=15)
+    res.raise_for_status()
+    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
 def ask_cerebras(prompt, api_key, history, stream=True):
     messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": prompt}]
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     payload = {"model": CEREBRAS_MODEL, "messages": messages, "stream": stream}
-    try:
-        res = requests.post(CEREBRAS_URL, headers=headers, json=payload, timeout=(5, 90), stream=stream)
-        res.raise_for_status()
-        full_res = ""
-        if stream:
-            for line in res.iter_lines():
-                if line:
-                    line_str = line.decode('utf-8')
-                    if line_str.startswith("data: "):
-                        data_str = line_str[6:]
-                        if data_str.strip() == "[DONE]": break
-                        chunk = json.loads(data_str)
-                        content = chunk['choices'][0]['delta'].get('content', '')
-                        print(content, end="", flush=True); full_res += content
-            print()
-        else:
-            full_res = res.json()['choices'][0]['message']['content']
-            print(clean_terminal_output(full_res))
-        return full_res
-    except Exception as e:
-        print(f"\033[91m[Error Cerebras]: {e}\033[0m")
-        return None
+    
+    res = requests.post(CEREBRAS_URL, headers=headers, json=payload, timeout=(5, 90), stream=stream)
+    res.raise_for_status()
+    full_res = ""
+    if stream:
+        for line in res.iter_lines():
+            if line:
+                line_str = line.decode('utf-8')
+                if line_str.startswith("data: "):
+                    data_str = line_str[6:]
+                    if data_str.strip() == "[DONE]": break
+                    chunk = json.loads(data_str)
+                    content = chunk['choices'][0]['delta'].get('content', '')
+                    print(content, end="", flush=True); full_res += content
+        print()
+    else:
+        full_res = res.json()['choices'][0]['message']['content']
+        print(clean_terminal_output(full_res))
+    return full_res
 
 def ask_ollama(prompt, history, stream=True):
     messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": prompt}]
-    try:
-        res = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "messages": messages, "stream": stream}, 
-                            timeout=(5, 180), stream=stream)
-        res.raise_for_status()
-        full_res = ""
-        if stream:
-            for line in res.iter_lines():
-                if line:
-                    chunk = json.loads(line)
-                    content = chunk.get('message', {}).get('content', '')
-                    print(content, end="", flush=True); full_res += content
-            print()
-        else:
-            full_res = res.json().get('message', {}).get('content', 'Error')
-            print(clean_terminal_output(full_res))
-        return full_res
-    except Exception as e:
-        err_msg = f"\033[91m[!] Error de red: {e}\033[0m"
-        print(err_msg)
-        return err_msg
+    res = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "messages": messages, "stream": stream}, 
+                        timeout=(5, 180), stream=stream)
+    res.raise_for_status()
+    full_res = ""
+    if stream:
+        for line in res.iter_lines():
+            if line:
+                chunk = json.loads(line)
+                content = chunk.get('message', {}).get('content', '')
+                print(content, end="", flush=True); full_res += content
+        print()
+    else:
+        full_res = res.json().get('message', {}).get('content', 'Error')
+        print(clean_terminal_output(full_res))
+    return full_res
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("-l", "--local", action="store_true")
     parser.add_argument("-c", "--cerebras", action="store_true")
     parser.add_argument("-g", "--global-mode", action="store_true")
-    parser.add_argument("-s", "--stream", action="store_true", default=True)
-    parser.add_argument("-ns", "--no-stream", action="store_false", dest="stream")
     parser.add_argument("-r", "--restart", action="store_true")
-    parser.add_argument("-h", "--help", action="store_true")
     parser.add_argument("message", nargs="*")
     args = parser.parse_args()
-
-    if args.help:
-        print("\033[94mChat Terminal 2026\033[0m: chat [-l local] [-c cerebras] [-g global] [-r restart] 'mensaje'"); return
 
     prompt = " ".join(args.message)
     if not prompt.strip(): return
@@ -165,35 +137,32 @@ def main():
     api_key_gemini = os.environ.get("GEMINI_API_KEY")
     api_key_cerebras = os.environ.get("CEREBRAS_API_KEY", "REMOVED")
 
-    if args.local: mode_label = "LOCAL"
-    elif args.cerebras: mode_label = "CEREBRAS"
-    else: mode_label = "NUBE"
+    mode_label = "LOCAL" if args.local else ("CEREBRAS" if args.cerebras else "NUBE")
+    print(f"\033[90m[{mode_label}] [{socket.gethostname().upper()}] [H:{len(history)//2}]\033[0m")
 
-    print(f"\033[90m[{mode_label}] [{socket.gethostname().upper()}] [H:{len(history)//2}] [Reset: -r]\033[0m")
-
+    res_text = None
     try:
-        res_text = None
         if args.local:
-            res_text = ask_ollama(prompt, history, stream=args.stream)
+            res_text = ask_ollama(prompt, history)
         elif args.cerebras:
-            res_text = ask_cerebras(prompt, api_key_cerebras, history, stream=args.stream)
+            res_text = ask_cerebras(prompt, api_key_cerebras, history)
         else:
             try:
-                res_text = ask_gemini(prompt, api_key_gemini, history, stream=args.stream)
+                # Intento Gemini
+                res_text = ask_gemini(prompt, api_key_gemini, history)
+                print(clean_terminal_output(res_text))
             except Exception as e:
-                if any(err in str(e).lower() for err in ["402", "429", "quota", "key", "authenticated"]):
-                    print("\033[93m[FALLBACK] Saltando a Cerebras...\033[0m")
-                    res_text = ask_cerebras(prompt, api_key_cerebras, history, stream=args.stream)
-                    if not res_text or res_text.startswith("\033[91m"):
-                        print("\033[93m[FALLBACK] Saltando a Local...\033[0m")
-                        res_text = ask_ollama(prompt, history, stream=args.stream)
-                else: 
-                    print(f"\033[91m[Error Gemini]: {e}\033[0m")
-                    return
+                print("\033[93m[FALLBACK] Saltando a Cerebras...\033[0m")
+                try:
+                    res_text = ask_cerebras(prompt, api_key_cerebras, history)
+                except:
+                    print("\033[93m[FALLBACK] Saltando a Local...\033[0m")
+                    res_text = ask_ollama(prompt, history)
         
-        if res_text and not res_text.startswith("\033[91m"):
+        if res_text:
             save_history(h_file, history, prompt, clean_terminal_output(res_text))
-    except Exception as e: print(f"Error Crítico: {e}")
+    except Exception as e:
+        print(f"\033[91m[!] Error Crítico: {e}\033[0m")
 
 if __name__ == "__main__":
     main()
