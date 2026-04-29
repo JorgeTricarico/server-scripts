@@ -21,7 +21,7 @@ from google.genai import types
 # 5. PUREZA DE TERMINAL: Salida en texto plano, sin markdown ni símbolos raros.
 # ==================================================================================
 
-GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
+GEMINI_MODEL = "gemini-2.0-flash" # Actualizado a un modelo estable
 OLLAMA_MODEL = "qwen2.5:1.5b"
 OLLAMA_URL = "http://100.115.152.45:11434/api/chat"
 
@@ -68,17 +68,25 @@ def save_history(h_file, history, user_msg, model_res):
 
 def ask_gemini(prompt, api_key, history, stream=True):
     client = genai.Client(api_key=api_key)
-    h_objs = [types.Content(role=("user" if m["role"]=="user" else "model"), 
-              parts=[types.Part(text=m["content"])]) for m in history]
+    # Formatear el historial correctamente para la nueva SDK
+    contents = []
+    for m in history:
+        role = "user" if m["role"] == "user" else "model"
+        contents.append(types.Content(role=role, parts=[types.Part(text=m["content"])]))
+    
+    # Añadir el prompt actual
+    contents.append(types.Content(role="user", parts=[types.Part(text=prompt)]))
+    
     full_res = ""
-    config = types.GenerateContentConfig(system_instruction=get_system_prompt(), history=h_objs)
+    config = types.GenerateContentConfig(system_instruction=get_system_prompt())
+    
     if stream:
-        for chunk in client.models.generate_content_stream(model=GEMINI_MODEL, contents=prompt, config=config):
+        for chunk in client.models.generate_content_stream(model=GEMINI_MODEL, contents=contents, config=config):
             text = chunk.text or ""
             print(text, end="", flush=True); full_res += text
         print()
     else:
-        res = client.models.generate_content(model=GEMINI_MODEL, contents=prompt, config=config)
+        res = client.models.generate_content(model=GEMINI_MODEL, contents=contents, config=config)
         full_res = res.text; print(clean_terminal_output(full_res))
     return full_res
 
