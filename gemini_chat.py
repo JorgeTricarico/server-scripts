@@ -21,9 +21,8 @@ from datetime import datetime
 
 GEMINI_MODEL = "gemini-3.1-flash-lite-preview"
 CEREBRAS_MODEL = "qwen2.5-72b"
-CEREBRAS_URL = "https://api.cerebras.ai/v1/chat/completions"
-OLLAMA_MODEL = "qwen2.5:1.5b"
-OLLAMA_URL = "http://100.115.152.45:11434/api/chat"
+SAMBANOVA_MODEL = "Meta-Llama-3.1-70B-Instruct"
+MISTRAL_MODEL = "mistral-tiny"
 
 PROMPTS = {
     "jorge-thinkpad-x270": "NODO MAESTRO. Estación de desarrollo principal.",
@@ -66,62 +65,35 @@ def save_history(h_file, history, user_msg, model_res):
     history.append({"role": "assistant", "content": model_res})
     with open(h_file, "w") as f: json.dump(history[-20:], f)
 
+def ask_openai_style(url, model, api_key, prompt, history, provider_name):
+    messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": prompt}]
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    payload = {"model": model, "messages": messages, "stream": False}
+    try:
+        res = requests.post(url, headers=headers, json=payload, timeout=15)
+        res.raise_for_status()
+        return res.json()['choices'][0]['message']['content'].strip()
+    except Exception as e:
+        print(f"\033[90m[Fallback] {provider_name} falló: {e}\033[0m")
+        return None
+
 def ask_gemini(prompt, api_key, history):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={api_key}"
     contents = [{"role": "user" if m["role"]=="user" else "model", "parts": [{"text": m["content"]}]} for m in history]
     contents.append({"role": "user", "parts": [{"text": f"{get_system_prompt()}\n\n{prompt}"}]})
-    
-    res = requests.post(url, json={"contents": contents}, timeout=15)
+    res = requests.post(url, json={"contents": contents}, timeout=10)
     res.raise_for_status()
     return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
 
-def ask_cerebras(prompt, api_key, history, stream=True):
+def ask_ollama(prompt, history):
+    url = "http://100.115.152.45:11434/api/chat"
     messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": prompt}]
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    payload = {"model": CEREBRAS_MODEL, "messages": messages, "stream": stream}
-    
-    res = requests.post(CEREBRAS_URL, headers=headers, json=payload, timeout=(5, 90), stream=stream)
+    res = requests.post(url, json={"model": "qwen2.5:1.5b", "messages": messages, "stream": False}, timeout=10)
     res.raise_for_status()
-    full_res = ""
-    if stream:
-        for line in res.iter_lines():
-            if line:
-                line_str = line.decode('utf-8')
-                if line_str.startswith("data: "):
-                    data_str = line_str[6:]
-                    if data_str.strip() == "[DONE]": break
-                    chunk = json.loads(data_str)
-                    content = chunk['choices'][0]['delta'].get('content', '')
-                    print(content, end="", flush=True); full_res += content
-        print()
-    else:
-        full_res = res.json()['choices'][0]['message']['content']
-        print(clean_terminal_output(full_res))
-    return full_res
-
-def ask_ollama(prompt, history, stream=True):
-    messages = [{"role": "system", "content": get_system_prompt()}] + history + [{"role": "user", "content": prompt}]
-    res = requests.post(OLLAMA_URL, json={"model": OLLAMA_MODEL, "messages": messages, "stream": stream}, 
-                        timeout=(5, 180), stream=stream)
-    res.raise_for_status()
-    full_res = ""
-    if stream:
-        for line in res.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                content = chunk.get('message', {}).get('content', '')
-                print(content, end="", flush=True); full_res += content
-        print()
-    else:
-        full_res = res.json().get('message', {}).get('content', 'Error')
-        print(clean_terminal_output(full_res))
-    return full_res
+    return res.json().get('message', {}).get('content', 'Error')
 
 def main():
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("-l", "--local", action="store_true")
-    parser.add_argument("-c", "--cerebras", action="store_true")
-    parser.add_argument("-g", "--global-mode", action="store_true")
     parser.add_argument("-r", "--restart", action="store_true")
     parser.add_argument("message", nargs="*")
     args = parser.parse_args()
@@ -129,40 +101,48 @@ def main():
     prompt = " ".join(args.message)
     if not prompt.strip(): return
 
-    h_file = get_h_file(args.global_mode)
-    if args.restart and os.path.exists(h_file):
-        os.remove(h_file); print("\033[90m[Sesión reiniciada]\033[0m")
+    h_file = get_h_file(False)
+    if args.restart and os.path.exists(h_file): os.remove(h_file)
 
     history = load_history(h_file)
-    api_key_gemini = os.environ.get("GEMINI_API_KEY")
-    api_key_cerebras = os.environ.get("CEREBRAS_API_KEY", "REMOVED")
+    keys = {
+        "gemini": os.environ.get("GEMINI_API_KEY"),
+        "cerebras": "REMOVED",
+        "sambanova": "REMOVED",
+        "mistral": "REMOVED"
+    }
 
-    mode_label = "LOCAL" if args.local else ("CEREBRAS" if args.cerebras else "NUBE")
-    print(f"\033[90m[{mode_label}] [{socket.gethostname().upper()}] [H:{len(history)//2}]\033[0m")
+    print(f"\033[90m[AUTO] [{socket.gethostname().upper()}] [H:{len(history)//2}]\033[0m")
 
     res_text = None
+    # CADENA DE FALLBACK INDESTRUCTIBLE
+    # 1. Gemini
     try:
-        if args.local:
-            res_text = ask_ollama(prompt, history)
-        elif args.cerebras:
-            res_text = ask_cerebras(prompt, api_key_cerebras, history)
+        res_text = ask_gemini(prompt, keys["gemini"], history)
+        if res_text: print(f"\033[32m[GEMINI]\033[0m {clean_terminal_output(res_text)}"); goto_save = True
+    except:
+        # 2. Cerebras
+        res_text = ask_openai_style("https://api.cerebras.ai/v1/chat/completions", CEREBRAS_MODEL, keys["cerebras"], prompt, history, "Cerebras")
+        if res_text: print(f"\033[33m[CEREBRAS]\033[0m {clean_terminal_output(res_text)}"); goto_save = True
         else:
-            try:
-                # Intento Gemini
-                res_text = ask_gemini(prompt, api_key_gemini, history)
-                print(clean_terminal_output(res_text))
-            except Exception as e:
-                print("\033[93m[FALLBACK] Saltando a Cerebras...\033[0m")
-                try:
-                    res_text = ask_cerebras(prompt, api_key_cerebras, history)
-                except:
-                    print("\033[93m[FALLBACK] Saltando a Local...\033[0m")
-                    res_text = ask_ollama(prompt, history)
-        
-        if res_text:
-            save_history(h_file, history, prompt, clean_terminal_output(res_text))
-    except Exception as e:
-        print(f"\033[91m[!] Error Crítico: {e}\033[0m")
+            # 3. SambaNova
+            res_text = ask_openai_style("https://api.sambanova.ai/v1/chat/completions", SAMBANOVA_MODEL, keys["sambanova"], prompt, history, "SambaNova")
+            if res_text: print(f"\033[34m[SAMBANOVA]\033[0m {clean_terminal_output(res_text)}"); goto_save = True
+            else:
+                # 4. Mistral
+                res_text = ask_openai_style("https://api.mistral.ai/v1/chat/completions", MISTRAL_MODEL, keys["mistral"], prompt, history, "Mistral")
+                if res_text: print(f"\033[35m[MISTRAL]\033[0m {clean_terminal_output(res_text)}"); goto_save = True
+                else:
+                    # 5. Local (Ollama)
+                    try:
+                        res_text = ask_ollama(prompt, history)
+                        print(f"\033[36m[LOCAL]\033[0m {clean_terminal_output(res_text)}"); goto_save = True
+                    except Exception as e:
+                        print(f"\033[91m[!] Error Crítico: Todos los proveedores fallaron.\033[0m")
+                        return
+
+    if res_text:
+        save_history(h_file, history, prompt, clean_terminal_output(res_text))
 
 if __name__ == "__main__":
     main()
